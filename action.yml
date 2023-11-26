@@ -1,0 +1,56 @@
+name: 'Autofill PR Description with OpenAI'
+description: "Autofill you pull request with a high quality description by harvesting the power of OpenAI and ChatGPT"
+inputs:
+  github_token:
+    description: 'The GitHub token'
+    required: true
+  openai_api_key:
+    description: 'OpenAI API key'
+    required: true
+  jira_username:
+    description: 'Jira username'
+    required: true
+  jira_api_token:
+    description: 'Jira API token'
+    required: true
+  jira_issue_key:
+    description: 'Jira issue key'
+    required: true
+  jira_base_url:
+    description: 'Jira base URL'
+    required: true
+  pull_request_id:
+    description: 'Pull request id (otherwise attempt to extract it from the GitHub metadata)'
+    required: false
+    default: ''
+  allowed_users:
+    description: 'Comma-separated list of GitHub usernames this action will run for, if empty it will run for all users'
+    required: false
+    default: ''
+  openai_model:
+    description: 'OpenAI model to use, needs to be compatible with the chat/completions endpoint'
+    required: false
+    default: 'gpt-3.5-turbo'
+  max_tokens:
+    description: 'Maximum number of prompt tokens to use'
+    required: false
+    default: '1000'
+  temperature:
+    description: 'Temperature for the model, higher values will make the model more creative, lower values will make it more conservative'
+    required: false
+    default: '0.6'
+  sample_prompt:
+    description: 'Sample prompt to use for the model, refer to SAMPLE_PROMPT in the Python file.'
+    required: false
+    default: ''
+  sample_response:
+    description: 'A sample of an ideal response based on the sample prompt'
+    required: false
+    default: ''
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+branding:
+  icon: 'cpu'
+  color: 'green'
