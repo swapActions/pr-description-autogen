@@ -19,7 +19,6 @@ fi
   --pull-request-id "$pull_request_id" \
   --github-token "$INPUT_GITHUB_TOKEN" \
   --openai-api-key "$INPUT_OPENAI_API_KEY" \
-  --jira-username "$INPUT_JIRA_USERNAME" \
   --jira-api-token "$INPUT_JIRA_API_TOKEN" \
   --jira-issue-key "$INPUT_JIRA_ISSUE_KEY" \
   --jira-base-url "$INPUT_JIRA_BASE_URL" \

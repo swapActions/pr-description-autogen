@@ -7,9 +7,6 @@ inputs:
   openai_api_key:
     description: 'OpenAI API key'
     required: true
-  jira_username:
-    description: 'Jira username'
-    required: true
   jira_api_token:
     description: 'Jira API token'
     required: true

@@ -89,12 +89,6 @@ def main():
         help="The OpenAI API key",
     )
     parser.add_argument(
-        "--jira-username",
-        type=str,
-        required=True,
-        help="Jira username",
-    )
-    parser.add_argument(
         "--jira-api-token",
         type=str,
         required=True,
@@ -126,7 +120,6 @@ def main():
     github_token = args.github_token
     pull_request_id = args.pull_request_id
     openai_api_key = args.openai_api_key
-    jira_username = args.jira_username
     jira_api_token = args.jira_api_token
     jira_issue_key = args.jira_issue_key
     jira_base_url = args.jira_base_url
