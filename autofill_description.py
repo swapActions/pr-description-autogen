@@ -199,30 +199,38 @@ def main():
         # Construct the URL for the Jira issue
         url = f'{jira_base_url}/rest/api/2/issue/{jira_issue_key}'
 
-        # Send a GET request to retrieve the issue details
-        response = requests.get(url, headers=headers)
+        try:
+            # Send a GET request to retrieve the issue details
+            response = requests.get(url, headers=headers)
+        except requests.exceptions.ConnectionError as e:
+            print(f"Connection error: {e}")
+            response = ""  # Set response to an empty string
 
-        print(
-            f'Jira issue description request status code: {response.status_code}')
-
-        if response.status_code == 200:
-            issue_data = response.json()
-            description = ""
-
-            if 'fields' in issue_data and 'description' in issue_data['fields']:
-                description_data = issue_data['fields']['description']
-
-                if 'content' in description_data:
-                    for content in description_data['content']:
-                        if content['type'] == 'paragraph':
-                            for paragraph_content in content['content']:
-                                if paragraph_content['type'] == 'text':
-                                    description += paragraph_content['text'] + " "
-
-            task_description = description.strip()  # Print the description
-        else:
+        if response:
             print(
-                f"Failed to fetch Jira issue description. Response: {response.text}")
+                f'Jira issue description request status code: {response.status_code}')
+
+            if response.status_code == 200:
+                issue_data = response.json()
+                description = ""
+
+                if 'fields' in issue_data and 'description' in issue_data['fields']:
+                    description_data = issue_data['fields']['description']
+
+                    if 'content' in description_data:
+                        for content in description_data['content']:
+                            if content['type'] == 'paragraph':
+                                for paragraph_content in content['content']:
+                                    if paragraph_content['type'] == 'text':
+                                        description += paragraph_content['text'] + " "
+
+                task_description = description.strip()  # Print the description
+            else:
+                print(
+                    f"Failed to fetch Jira issue description. Response: {response.text}")
+                task_description = ""
+        else:
+            print("No response received. Setting task description to an empty string.")
             task_description = ""
 
         # Define an array of filenames to exclude
