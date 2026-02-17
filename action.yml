@@ -25,9 +25,9 @@ inputs:
     required: false
     default: ""
   openai_model:
-    description: "OpenAI model to use, can be a chat or completion model"
+    description: "OpenAI model to use (Responses API), e.g. gpt-5.2"
     required: false
-    default: "gpt-3.5-turbo"
+    default: "gpt-4.1-nano"
   max_tokens:
     description: "Maximum number of prompt tokens to use"
     required: false

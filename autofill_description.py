@@ -3,8 +3,8 @@ import argparse
 import os
 import sys
 
-import openai
 import requests
+from openai import OpenAI
 
 SAMPLE_PROMPT = """
 Write a pull request description focusing on the motivation behind the change and why it improves the project.
@@ -288,20 +288,20 @@ def main():
     )
 
     print(f"Using model: '{open_ai_model}'")
-    openai.api_key = openai_api_key
+    client = OpenAI(api_key=openai_api_key)
 
     try:
-        openai_response = openai.Completion.create(
+        openai_response = client.responses.create(
             model=open_ai_model,
-            prompt=prompt_text,
+            input=prompt_text,
             temperature=model_temperature,
-            max_tokens=max_prompt_tokens,
+            max_output_tokens=max_prompt_tokens,
         )
     except Exception as error:
-        print(f"Completion API failed for model '{open_ai_model}': {error}")
+        print(f"Responses API failed for model '{open_ai_model}': {error}")
         return 1
 
-    generated_pr_description = (openai_response.choices[0].text or "").strip()
+    generated_pr_description = (openai_response.output_text or "").strip()
 
     redundant_prefix = "This pull request "
     if generated_pr_description.startswith(redundant_prefix):
