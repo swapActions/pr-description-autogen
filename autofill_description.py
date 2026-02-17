@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-import sys
-import requests
 import argparse
-import json
-import openai
 import os
-import base64
+import sys
+
+import openai
+import requests
 
 SAMPLE_PROMPT = """
 Write a pull request description focusing on the motivation behind the change and why it improves the project.
@@ -60,52 +59,134 @@ The sorting functionality on "Principal Investigator" and "PI Email" columns was
 """
 
 
+def _extract_jira_description(issue_data):
+    description = ""
+    fields = issue_data.get("fields", {})
+    raw_description = fields.get("description")
+
+    if isinstance(raw_description, str):
+        return raw_description.strip()
+
+    if isinstance(raw_description, dict):
+        for block in raw_description.get("content", []):
+            if block.get("type") != "paragraph":
+                continue
+            for part in block.get("content", []):
+                if part.get("type") == "text":
+                    description += part.get("text", "") + " "
+
+    return description.strip()
+
+
+def _fetch_jira_task_description(jira_base_url, jira_issue_key, jira_api_token):
+    if not jira_base_url or not jira_issue_key or not jira_api_token:
+        return ""
+
+    url = f"{jira_base_url}/rest/api/2/issue/{jira_issue_key}"
+    headers = {
+        "Authorization": f"Bearer {jira_api_token}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=20)
+    except requests.exceptions.RequestException as error:
+        print(f"Failed to fetch Jira issue: {error}")
+        return ""
+
+    print(
+        f"Jira issue description request status code: {response.status_code}")
+
+    if response.status_code != 200:
+        print(
+            f"Failed to fetch Jira issue description. Response: {response.text}")
+        return ""
+
+    try:
+        issue_data = response.json()
+    except ValueError:
+        print("Failed to parse Jira response as JSON")
+        return ""
+
+    return _extract_jira_description(issue_data)
+
+
+def _build_prompt(pull_request_title, task_description, pull_request_files):
+    exclude_filenames = {"package-lock.json"}
+
+    prompt = f"""
+Write a concise pull request description focusing on the motivation behind the change so that it is helpful for the reviewer to understand.
+Go straight to the point, avoid verbosity.
+Pull request description should consist of three sections:
+## Description
+This is the concise high level description in one short sentence of the PR. (what).
+
+## Motivation and Context
+Why is this change required? Explain in one short sentence. What problem does it solve? (why)
+
+## Changes
+Go through step by step. What types of changes does your code introduce? Keep it short focusing only on maximum 3 most important changes. (how)
+
+Below is additional context regarding task from the Jira ticket. Use them to write better description and motivation:
+{task_description}
+
+The title of the pull request is "{pull_request_title}" and the following changes took place:
+"""
+
+    for pull_request_file in pull_request_files:
+        if "patch" not in pull_request_file:
+            continue
+
+        filename = pull_request_file.get("filename", "")
+        if filename in exclude_filenames:
+            continue
+
+        patch = pull_request_file["patch"]
+        prompt += f"\nChanges in file {filename}: {patch}\n"
+
+    max_allowed_tokens = 2048
+    characters_per_token = 4
+    max_allowed_characters = max_allowed_tokens * characters_per_token
+    if len(prompt) > max_allowed_characters:
+        prompt = prompt[:max_allowed_characters]
+
+    return prompt
+
+
+def _get_sample_prompt_from_env():
+    return os.environ.get(
+        "INPUT_MODEL_SAMPLE_PROMPT",
+        os.environ.get("INPUT_SAMPLE_PROMPT", SAMPLE_PROMPT),
+    )
+
+
+def _get_sample_response_from_env():
+    return os.environ.get(
+        "INPUT_MODEL_SAMPLE_RESPONSE",
+        os.environ.get("INPUT_SAMPLE_RESPONSE", GOOD_SAMPLE_RESPONSE),
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Use ChatGPT to generate a description for a pull request."
     )
-    parser.add_argument(
-        "--github-api-url", type=str, required=True, help="The GitHub API URL"
-    )
-    parser.add_argument(
-        "--github-repository", type=str, required=True, help="The GitHub repository"
-    )
-    parser.add_argument(
-        "--pull-request-id",
-        type=int,
-        required=True,
-        help="The pull request ID",
-    )
-    parser.add_argument(
-        "--github-token",
-        type=str,
-        required=True,
-        help="The GitHub token",
-    )
-    parser.add_argument(
-        "--openai-api-key",
-        type=str,
-        required=True,
-        help="The OpenAI API key",
-    )
-    parser.add_argument(
-        "--jira-api-token",
-        type=str,
-        required=True,
-        help="Jira API token",
-    )
-    parser.add_argument(
-        "--jira-issue-key",
-        type=str,
-        required=True,
-        help="Jira issue key",
-    )
-    parser.add_argument(
-        "--jira-base-url",
-        type=str,
-        required=True,
-        help="Jira base URL",
-    )
+    parser.add_argument("--github-api-url", type=str,
+                        required=True, help="The GitHub API URL")
+    parser.add_argument("--github-repository", type=str,
+                        required=True, help="The GitHub repository")
+    parser.add_argument("--pull-request-id", type=int,
+                        required=True, help="The pull request ID")
+    parser.add_argument("--github-token", type=str,
+                        required=True, help="The GitHub token")
+    parser.add_argument("--openai-api-key", type=str,
+                        required=True, help="The OpenAI API key")
+    parser.add_argument("--jira-api-token", type=str,
+                        required=True, help="Jira API token")
+    parser.add_argument("--jira-issue-key", type=str,
+                        required=True, help="Jira issue key")
+    parser.add_argument("--jira-base-url", type=str,
+                        required=True, help="Jira base URL")
     parser.add_argument(
         "--allowed-users",
         type=str,
@@ -125,216 +206,145 @@ def main():
     jira_base_url = args.jira_base_url
 
     allowed_users = os.environ.get("INPUT_ALLOWED_USERS", "")
-    if allowed_users:
-        allowed_users = allowed_users.split(",")
+    allowed_users = allowed_users.split(",") if allowed_users else []
+
     open_ai_model = os.environ.get("INPUT_OPENAI_MODEL", "gpt-4.1-nano")
     max_prompt_tokens = int(os.environ.get("INPUT_MAX_TOKENS", "1000"))
     model_temperature = float(os.environ.get("INPUT_TEMPERATURE", "0.6"))
-    model_sample_prompt = os.environ.get(
-        "INPUT_MODEL_SAMPLE_PROMPT", SAMPLE_PROMPT)
-    model_sample_response = os.environ.get(
-        "INPUT_MODEL_SAMPLE_RESPONSE", GOOD_SAMPLE_RESPONSE
-    )
+    model_sample_prompt = _get_sample_prompt_from_env()
+    model_sample_response = _get_sample_response_from_env()
+
     authorization_header = {
         "Accept": "application/vnd.github.v3+json",
-        "Authorization": "token %s" % github_token,
+        "Authorization": f"token {github_token}",
     }
 
     pull_request_url = f"{github_api_url}/repos/{repo}/pulls/{pull_request_id}"
     pull_request_result = requests.get(
-        pull_request_url,
-        headers=authorization_header,
-    )
+        pull_request_url, headers=authorization_header, timeout=20)
     if pull_request_result.status_code != requests.codes.ok:
-        print(
-            "Request to get pull request data failed: "
-            + str(pull_request_result.status_code)
-        )
+        print("Request to get pull request data failed: " +
+              str(pull_request_result.status_code))
         return 1
-    pull_request_data = json.loads(pull_request_result.text)
 
-    if pull_request_data["body"]:
+    try:
+        pull_request_data = pull_request_result.json()
+    except ValueError:
+        print("Failed to parse pull request response as JSON")
+        return 1
+
+    if pull_request_data.get("body"):
         print("Pull request already has a description, skipping")
         return 0
 
     if allowed_users:
-        pr_author = pull_request_data["user"]["login"]
+        pr_author = pull_request_data.get("user", {}).get("login", "")
         if pr_author not in allowed_users:
             print(
-                f"Pull request author {pr_author} is not allowed to trigger this action"
-            )
+                f"Pull request author {pr_author} is not allowed to trigger this action")
             return 0
 
-    pull_request_title = pull_request_data["title"]
+    pull_request_title = pull_request_data.get("title", "")
 
     pull_request_files = []
-    # Request a maximum of 10 pages (300 files)
     for page_num in range(1, 11):
         pull_files_url = f"{pull_request_url}/files?page={page_num}&per_page=30"
         pull_files_result = requests.get(
-            pull_files_url,
-            headers=authorization_header,
-        )
+            pull_files_url, headers=authorization_header, timeout=20)
 
         if pull_files_result.status_code != requests.codes.ok:
-            print(
-                "Request to get list of files failed with error code: "
-                + str(pull_files_result.status_code)
-            )
+            print("Request to get list of files failed with error code: " +
+                  str(pull_files_result.status_code))
             return 1
 
-        pull_files_chunk = json.loads(pull_files_result.text)
+        try:
+            pull_files_chunk = pull_files_result.json()
+        except ValueError:
+            print("Failed to parse files response as JSON")
+            return 1
 
         if len(pull_files_chunk) == 0:
             break
 
         pull_request_files.extend(pull_files_chunk)
 
-        # Create the headers with basic authentication using the API token
-        headers = {
-            'Authorization': f'Bearer {jira_api_token}',
-            'Content-Type': 'application/json',
-        }
+    task_description = _fetch_jira_task_description(
+        jira_base_url, jira_issue_key, jira_api_token)
 
-        # Construct the URL for the Jira issue
-        url = f'{jira_base_url}/rest/api/2/issue/{jira_issue_key}'
+    completion_prompt = _build_prompt(
+        pull_request_title=pull_request_title,
+        task_description=task_description,
+        pull_request_files=pull_request_files,
+    )
 
-        try:
-            # Send a GET request to retrieve the issue details
-            response = requests.get(url, headers=headers)
-        except requests.exceptions.ConnectionError as e:
-            print(f"Connection error: {e}")
-            response = ""  # Set response to an empty string
-
-        if response:
-            print(
-                f'Jira issue description request status code: {response.status_code}')
-
-            if response.status_code == 200:
-                issue_data = response.json()
-                description = ""
-
-                if 'fields' in issue_data and 'description' in issue_data['fields']:
-                    description_data = issue_data['fields']['description']
-
-                    if 'content' in description_data:
-                        for content in description_data['content']:
-                            if content['type'] == 'paragraph':
-                                for paragraph_content in content['content']:
-                                    if paragraph_content['type'] == 'text':
-                                        description += paragraph_content['text'] + " "
-
-                task_description = description.strip()  # Print the description
-            else:
-                print(
-                    f"Failed to fetch Jira issue description. Response: {response.text}")
-                task_description = ""
-        else:
-            print("No response received. Setting task description to an empty string.")
-            task_description = ""
-
-        # Define an array of filenames to exclude
-        exclude_filenames = ["package-lock.json"]
-
-        completion_prompt = f"""
-Write a concise pull request description focusing on the motivation behind the change so that it is helpful for the reviewer to understand.
-Go straight to the point, avoid verbosity.
-Pull request description should consist of three sections:
-## Description
-This is the concise high level description in one short sentence of the PR. (what).
-
-## Motivation and Context
-Why is this change required? Explain in one short sentence. What problem does it solve? (why)
-
-## Changes
-Go through step by step. What types of changes does your code introduce? Keep it short focusing only on maximum 3 most important changes. (how)
-
-Below is additional context regarding task from the Jira ticket. Use them to write better description and motivation:
-{task_description}
-
-The title of the pull request is "{pull_request_title}" and the following changes took place: \n
-"""
-    for pull_request_file in pull_request_files:
-        # Not all PR file metadata entries may contain a patch section
-        # For example, entries related to removed binary files may not contain it
-        if "patch" not in pull_request_file:
-            continue
-
-        filename = pull_request_file["filename"]
-
-        if filename in exclude_filenames:
-            continue
-
-        patch = pull_request_file["patch"]
-        completion_prompt += f"Changes in file {filename}: {patch}\n"
-
-    max_allowed_tokens = 2048  # 4096 is the maximum allowed by OpenAI for GPT-3.5
-    characters_per_token = 4  # The average number of characters per token
-    max_allowed_characters = max_allowed_tokens * characters_per_token
-    if len(completion_prompt) > max_allowed_characters:
-        completion_prompt = completion_prompt[:max_allowed_characters]
+    prompt_text = (
+        "You are a world class expert full stack web developer having experience with nodejs, "
+        "typescript, express who writes pull request descriptions adding 'description' and "
+        "'how has this been tested' sections.\n\n"
+        f"User: {model_sample_prompt}\n"
+        f"Assistant: {model_sample_response}\n"
+        f"User: {completion_prompt}\n"
+        "Assistant:"
+    )
 
     print(f"Using model: '{open_ai_model}'")
-
     openai.api_key = openai_api_key
 
     try:
-        openai_response = openai.ChatCompletion.create(
+        openai_response = openai.Completion.create(
             model=open_ai_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.",
-                },
-                {"role": "user", "content": model_sample_prompt},
-                {"role": "assistant", "content": model_sample_response},
-                {"role": "user", "content": completion_prompt},
-            ],
+            prompt=prompt_text,
             temperature=model_temperature,
             max_tokens=max_prompt_tokens,
         )
-        generated_pr_description = openai_response.choices[0].message.content
-    except openai.error.InvalidRequestError as e:
-        print(f"ChatCompletion failed for model '{open_ai_model}': {e}")
-        print("Falling back to Completion API...")
-        # Fallback to Completion API if ChatCompletion fails (e.g. for non-chat models like gpt-5.2-codex)
-        prompt_text = f"You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.\n\nUser: {model_sample_prompt}\nAssistant: {model_sample_response}\nUser: {completion_prompt}\nAssistant:"
+    except Exception as error:
+        print(f"Completion API failed for model '{open_ai_model}': {error}")
+        return 1
 
-        try:
-            openai_response = openai.Completion.create(
-                model=open_ai_model,
-                prompt=prompt_text,
-                temperature=model_temperature,
-                max_tokens=max_prompt_tokens,
-            )
-            generated_pr_description = openai_response.choices[0].text.strip()
-        except Exception as e:
-            print(
-                f"Completion API also failed for model '{open_ai_model}': {e}")
-            raise e
+    generated_pr_description = (openai_response.choices[0].text or "").strip()
 
     redundant_prefix = "This pull request "
     if generated_pr_description.startswith(redundant_prefix):
         generated_pr_description = generated_pr_description[len(
             redundant_prefix):]
-        generated_pr_description = (
-            generated_pr_description[0].upper() + generated_pr_description[1:]
-        )
-    how_has_this_been_tested_section = "## How Has This Been Tested?\n\n<!--- Please describe in detail how you tested your changes. -->\n<!--- Include details of your testing environment, and the tests you ran to -->\n<!--- see how your change affects other areas of the code, etc. -->"
-    fixes_jira_issue_section = f"## Fixes Jira Issue\n\n[{jira_base_url}/browse/{jira_issue_key}]({jira_base_url}/browse/{jira_issue_key})"
-    depends_on_section = "## Depends On\n\n<!--- Does this PR depend on another PR that should be merged first or at the same time -->"
-    tests_section = "## Tests included/Docs Updated?\n\n<!--- Go over all the following points, and put an `x` in all the boxes that apply. -->\n\n- [ ] I have added tests to cover my changes.\n- [ ] All relevant doc has been updated"
-    generated_pr_description = f'{generated_pr_description}\n\n{how_has_this_been_tested_section}\n\n{fixes_jira_issue_section}\n\n{depends_on_section}\n\n{tests_section}'
-    print(f"Generated pull request description: '{generated_pr_description}'")
-    issues_url = "%s/repos/%s/issues/%s" % (
-        github_api_url,
-        repo,
-        pull_request_id,
+        if generated_pr_description:
+            generated_pr_description = generated_pr_description[0].upper(
+            ) + generated_pr_description[1:]
+
+    how_has_this_been_tested_section = (
+        "## How Has This Been Tested?\n\n"
+        "<!--- Please describe in detail how you tested your changes. -->\n"
+        "<!--- Include details of your testing environment, and the tests you ran to -->\n"
+        "<!--- see how your change affects other areas of the code, etc. -->"
     )
+    fixes_jira_issue_section = (
+        f"## Fixes Jira Issue\n\n[{jira_base_url}/browse/{jira_issue_key}]"
+        f"({jira_base_url}/browse/{jira_issue_key})"
+    )
+    depends_on_section = "## Depends On\n\n<!--- Does this PR depend on another PR that should be merged first or at the same time -->"
+    tests_section = (
+        "## Tests included/Docs Updated?\n\n"
+        "<!--- Go over all the following points, and put an `x` in all the boxes that apply. -->\n\n"
+        "- [ ] I have added tests to cover my changes.\n"
+        "- [ ] All relevant doc has been updated"
+    )
+
+    generated_pr_description = (
+        f"{generated_pr_description}\n\n"
+        f"{how_has_this_been_tested_section}\n\n"
+        f"{fixes_jira_issue_section}\n\n"
+        f"{depends_on_section}\n\n"
+        f"{tests_section}"
+    )
+
+    print(f"Generated pull request description: '{generated_pr_description}'")
+
+    issues_url = f"{github_api_url}/repos/{repo}/issues/{pull_request_id}"
     update_pr_description_result = requests.patch(
         issues_url,
         headers=authorization_header,
         json={"body": generated_pr_description},
+        timeout=20,
     )
 
     if update_pr_description_result.status_code != requests.codes.ok:
@@ -344,6 +354,8 @@ The title of the pull request is "{pull_request_title}" and the following change
         )
         print("Response: " + update_pr_description_result.text)
         return 1
+
+    return 0
 
 
 if __name__ == "__main__":
