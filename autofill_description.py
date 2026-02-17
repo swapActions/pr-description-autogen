@@ -277,22 +277,35 @@ The title of the pull request is "{pull_request_title}" and the following change
     print(f"Using model: '{open_ai_model}'")
 
     openai.api_key = openai_api_key
-    openai_response = openai.ChatCompletion.create(
-        model=open_ai_model,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.",
-            },
-            {"role": "user", "content": model_sample_prompt},
-            {"role": "assistant", "content": model_sample_response},
-            {"role": "user", "content": completion_prompt},
-        ],
-        temperature=model_temperature,
-        max_tokens=max_prompt_tokens,
-    )
 
-    generated_pr_description = openai_response.choices[0].message.content
+    try:
+        openai_response = openai.ChatCompletion.create(
+            model=open_ai_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.",
+                },
+                {"role": "user", "content": model_sample_prompt},
+                {"role": "assistant", "content": model_sample_response},
+                {"role": "user", "content": completion_prompt},
+            ],
+            temperature=model_temperature,
+            max_tokens=max_prompt_tokens,
+        )
+        generated_pr_description = openai_response.choices[0].message.content
+    except openai.error.InvalidRequestError:
+        # Fallback to Completion API if ChatCompletion fails (e.g. for non-chat models like gpt-5.2-codex)
+        prompt_text = f"You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.\n\nUser: {model_sample_prompt}\nAssistant: {model_sample_response}\nUser: {completion_prompt}\nAssistant:"
+
+        openai_response = openai.Completion.create(
+            model=open_ai_model,
+            prompt=prompt_text,
+            temperature=model_temperature,
+            max_tokens=max_prompt_tokens,
+        )
+        generated_pr_description = openai_response.choices[0].text.strip()
+
     redundant_prefix = "This pull request "
     if generated_pr_description.startswith(redundant_prefix):
         generated_pr_description = generated_pr_description[len(
