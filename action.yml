@@ -33,7 +33,7 @@ inputs:
     required: false
     default: "1000"
   temperature:
-    description: "Temperature for the model, higher values will make the model more creative, lower values will make it more conservative"
+    description: "Temperature for compatible models (ignored for GPT-5/Codex when unsupported)"
     required: false
     default: "0.6"
   sample_prompt:

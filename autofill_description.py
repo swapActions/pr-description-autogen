@@ -290,16 +290,51 @@ def main():
     print(f"Using model: '{open_ai_model}'")
     client = OpenAI(api_key=openai_api_key)
 
-    try:
-        openai_response = client.responses.create(
-            model=open_ai_model,
-            input=prompt_text,
-            temperature=model_temperature,
-            max_output_tokens=max_prompt_tokens,
+    request_payload = {
+        "model": open_ai_model,
+        "input": prompt_text,
+        "max_output_tokens": max_prompt_tokens,
+    }
+
+    # GPT-5.2-Codex and some GPT-5 configurations do not support temperature.
+    # Keep interface compatibility (INPUT_TEMPERATURE) but only send temperature
+    # for models/endpoints where it is accepted.
+    model_name_lower = open_ai_model.lower()
+    should_send_temperature = not (
+        "codex" in model_name_lower
+        or model_name_lower.startswith("gpt-5")
+    )
+    if should_send_temperature:
+        request_payload["temperature"] = model_temperature
+    else:
+        print(
+            "Skipping temperature parameter for GPT-5/Codex model compatibility."
         )
+
+    try:
+        openai_response = client.responses.create(**request_payload)
     except Exception as error:
-        print(f"Responses API failed for model '{open_ai_model}': {error}")
-        return 1
+        error_message = str(error)
+        unsupported_temperature = (
+            "Unsupported parameter" in error_message
+            and "temperature" in error_message
+        )
+
+        if unsupported_temperature and "temperature" in request_payload:
+            print(
+                "Model rejected temperature. Retrying request without temperature."
+            )
+            del request_payload["temperature"]
+            try:
+                openai_response = client.responses.create(**request_payload)
+            except Exception as retry_error:
+                print(
+                    f"Responses API failed for model '{open_ai_model}' after retry: {retry_error}"
+                )
+                return 1
+        else:
+            print(f"Responses API failed for model '{open_ai_model}': {error}")
+            return 1
 
     generated_pr_description = (openai_response.output_text or "").strip()
 
