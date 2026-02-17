@@ -11,7 +11,7 @@ SAMPLE_PROMPT = """
 Write a pull request description focusing on the motivation behind the change and why it improves the project.
 Go straight to the point.
 
-The title of the pull request is "Fix sorting on "Principal Investigator" and "PI Email" for proposal table" and the following changes took place: 
+The title of the pull request is "Fix sorting on "Principal Investigator" and "PI Email" for proposal table" and the following changes took place:
 
 Changes in file diff --git a/apps/backend/src/datasources/postgres/ProposalDataSource.ts b/apps/backend/src/datasources/postgres/ProposalDataSource.ts
 index 425b38954..4014fafd6 100644
@@ -24,7 +24,7 @@ index 425b38954..4014fafd6 100644
 -  submitted: 'proposal_table_view.submitted',
 -  notified: 'proposal_table_view.notified',
  };
- 
+
  export async function calculateReferenceNumber(
 diff --git a/apps/frontend/src/components/proposal/ProposalTableOfficer.tsx b/apps/frontend/src/components/proposal/ProposalTableOfficer.tsx
 index d495d9fed..00dff28a2 100644
@@ -236,7 +236,7 @@ def main():
         # Define an array of filenames to exclude
         exclude_filenames = ["package-lock.json"]
 
-        completion_prompt = f""" 
+        completion_prompt = f"""
 Write a concise pull request description focusing on the motivation behind the change so that it is helpful for the reviewer to understand.
 Go straight to the point, avoid verbosity.
 Pull request description should consist of three sections:
@@ -249,7 +249,7 @@ Why is this change required? Explain in one short sentence. What problem does it
 ## Changes
 Go through step by step. What types of changes does your code introduce? Keep it short focusing only on maximum 3 most important changes. (how)
 
-Below is additional context regarding task from the Jira ticket. Use them to write better description and motivation: 
+Below is additional context regarding task from the Jira ticket. Use them to write better description and motivation:
 {task_description}
 
 The title of the pull request is "{pull_request_title}" and the following changes took place: \n
@@ -294,17 +294,24 @@ The title of the pull request is "{pull_request_title}" and the following change
             max_tokens=max_prompt_tokens,
         )
         generated_pr_description = openai_response.choices[0].message.content
-    except openai.error.InvalidRequestError:
+    except openai.error.InvalidRequestError as e:
+        print(f"ChatCompletion failed for model '{open_ai_model}': {e}")
+        print("Falling back to Completion API...")
         # Fallback to Completion API if ChatCompletion fails (e.g. for non-chat models like gpt-5.2-codex)
         prompt_text = f"You are a world class expert full stack web developer having experience with nodejs, typescript, express who writes pull request descriptions adding 'description' and 'how has this been tested' sections.\n\nUser: {model_sample_prompt}\nAssistant: {model_sample_response}\nUser: {completion_prompt}\nAssistant:"
 
-        openai_response = openai.Completion.create(
-            model=open_ai_model,
-            prompt=prompt_text,
-            temperature=model_temperature,
-            max_tokens=max_prompt_tokens,
-        )
-        generated_pr_description = openai_response.choices[0].text.strip()
+        try:
+            openai_response = openai.Completion.create(
+                model=open_ai_model,
+                prompt=prompt_text,
+                temperature=model_temperature,
+                max_tokens=max_prompt_tokens,
+            )
+            generated_pr_description = openai_response.choices[0].text.strip()
+        except Exception as e:
+            print(
+                f"Completion API also failed for model '{open_ai_model}': {e}")
+            raise e
 
     redundant_prefix = "This pull request "
     if generated_pr_description.startswith(redundant_prefix):
